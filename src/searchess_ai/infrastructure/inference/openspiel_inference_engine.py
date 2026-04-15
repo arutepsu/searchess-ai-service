@@ -14,11 +14,16 @@ policy documentation. See _openspiel_chess.py for OpenSpiel state operations.
 from __future__ import annotations
 
 import importlib
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from searchess_ai.application.port.inference_engine import InferenceEngine
-from searchess_ai.domain.inference import DecisionType, InferenceDecision, InferenceRequest
+from searchess_ai.domain.inference import (
+    DecisionType,
+    InferenceDecision,
+    InferenceRequest,
+)
 from searchess_ai.domain.model import ModelId, ModelVersion
 from searchess_ai.infrastructure.inference._openspiel_chess import (
     get_legal_move_candidates,
@@ -35,12 +40,36 @@ from searchess_ai.infrastructure.inference._openspiel_mapping import (
     reconcile_moves,
     validate_fen,
 )
-
-# Re-export so existing callers (api/errors.py, api/app.py) keep working
-# without any import changes.
 from searchess_ai.infrastructure.inference._openspiel_mapping import (  # noqa: F401
     OpenSpielAdapterError,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _build_decision_log_payload(
+    request: InferenceRequest,
+    heuristic: object,
+    reconciliation_result: MoveReconciliationResult,
+    confidence: float | None,
+    reconciliation_policy: ReconciliationPolicy,
+) -> dict[str, object]:
+    return {
+        "event": "openspiel_inference_decision",
+        "request_id": request.request_id,
+        "match_id": request.match_id,
+        "heuristic_profile": getattr(getattr(heuristic, "profile", None), "value", None),
+        "candidate_count": getattr(heuristic, "candidate_count", None),
+        "top_move": getattr(heuristic, "top_move", None),
+        "top_score": getattr(heuristic, "top_score", None),
+        "selected_reason": getattr(heuristic, "selected_reason", None),
+        "selected_move": reconciliation_result.selected_move.value,
+        "fallback_used": reconciliation_result.fallback_used,
+        "confidence": confidence,
+        "reconciliation_policy": reconciliation_policy.value,
+    }
+
+
 def _resolve_heuristic_profile(policy_profile: object) -> HeuristicProfile:
     """
     Map request policy_profile into an internal heuristic profile.
@@ -57,6 +86,7 @@ def _resolve_heuristic_profile(policy_profile: object) -> HeuristicProfile:
     if value == HeuristicProfile.PRESERVE_ORDER.value:
         return HeuristicProfile.PRESERVE_ORDER
     return HeuristicProfile.STANDARD
+
 
 def _require_pyspiel() -> Any:
     """Return the pyspiel module, or raise OpenSpielAdapterError if absent."""
@@ -113,6 +143,21 @@ class OpenSpielInferenceEngine(InferenceEngine):
             self.reconciliation_policy,
         )
 
+        confidence = heuristic_confidence(heuristic, result.fallback_used)
+
+        logger.info(
+            "OpenSpiel inference decision",
+            extra={
+                "decision_payload": _build_decision_log_payload(
+                    request=request,
+                    heuristic=heuristic,
+                    reconciliation_result=result,
+                    confidence=confidence,
+                    reconciliation_policy=self.reconciliation_policy,
+                )
+            },
+        )
+
         return InferenceDecision(
             request_id=request.request_id,
             decision_type=DecisionType.MOVE,
@@ -121,5 +166,5 @@ class OpenSpielInferenceEngine(InferenceEngine):
             model_version=request.model_version or self.default_model_version,
             decision_time_millis=0,
             policy_profile=request.policy_profile,
-            confidence=heuristic_confidence(heuristic, result.fallback_used),
+            confidence=confidence,
         )

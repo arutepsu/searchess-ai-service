@@ -64,13 +64,20 @@ class TestRankCandidates:
 
         assert [candidate.move for candidate in ranked] == ["e2e4", "d2d4", "g1f3"]
 
-    def test_two_captures_preserve_original_order(self) -> None:
-        a = OpenSpielMoveCandidate(move="d4e5", is_capture=True)
-        b = OpenSpielMoveCandidate(move="c4d5", is_capture=True)
-
-        ranked = rank_candidates([a, b])
-
-        assert [candidate.move for candidate in ranked] == ["d4e5", "c4d5"]
+    def test_preserve_order_keeps_original_order(self) -> None:
+        result = build_heuristic_decision(
+            [
+                OpenSpielMoveCandidate(move="e2e4"),
+                OpenSpielMoveCandidate(move="d4e5", is_capture=True),
+                OpenSpielMoveCandidate(move="e7e8q", is_promotion=True),
+            ],
+            HeuristicProfile.PRESERVE_ORDER,
+        )
+        assert result.ranked_moves == ["e2e4", "d4e5", "e7e8q"]
+        assert result.selected_reason == "preserve_order"
+        assert result.top_score == 0
+        assert result.profile == HeuristicProfile.PRESERVE_ORDER
+        assert result.candidate_count == 3
 
 
 class TestOrderedMoveStrings:
@@ -84,14 +91,15 @@ class TestOrderedMoveStrings:
 
 class TestBuildHeuristicDecision:
     def test_returns_empty_result_for_no_candidates(self) -> None:
-        result = build_heuristic_decision([])
+        result = build_heuristic_decision([], HeuristicProfile.STANDARD)
         assert result == HeuristicDecisionResult(
             ranked_moves=[],
             top_move=None,
             top_score=None,
             selected_reason=None,
+            profile=HeuristicProfile.STANDARD,
+            candidate_count=0,
         )
-
     def test_returns_top_move_and_reason_for_promotion(self) -> None:
         result = build_heuristic_decision([
             OpenSpielMoveCandidate(move="e2e4"),
@@ -101,6 +109,8 @@ class TestBuildHeuristicDecision:
         assert result.top_score == 100
         assert result.selected_reason == "promotion"
         assert result.ranked_moves == ["e7e8q", "e2e4"]
+        assert result.profile == HeuristicProfile.STANDARD
+        assert result.candidate_count == 2
 
     def test_returns_top_move_and_reason_for_capture(self) -> None:
         result = build_heuristic_decision([
@@ -128,6 +138,8 @@ class TestHeuristicConfidence:
             top_move=None,
             top_score=None,
             selected_reason=None,
+            profile=HeuristicProfile.STANDARD,
+            candidate_count=0,
         )
         assert heuristic_confidence(decision, fallback_used=False) is None
 
@@ -137,6 +149,8 @@ class TestHeuristicConfidence:
             top_move="e7e8q",
             top_score=100,
             selected_reason="promotion",
+            profile=HeuristicProfile.STANDARD,
+            candidate_count=1,
         )
         assert heuristic_confidence(decision, fallback_used=True) == 0.2
 
@@ -145,7 +159,9 @@ class TestHeuristicConfidence:
             ranked_moves=["e7e8q"],
             top_move="e7e8q",
             top_score=100,
-            selected_reason="promotion",
+            selected_reason="promotion",\
+            profile=HeuristicProfile.STANDARD,
+            candidate_count=1,
         )
         assert heuristic_confidence(decision, fallback_used=False) == 0.9
 
@@ -155,6 +171,8 @@ class TestHeuristicConfidence:
             top_move="d4e5",
             top_score=10,
             selected_reason="capture",
+            profile=HeuristicProfile.STANDARD,
+            candidate_count=1,
         )
         assert heuristic_confidence(decision, fallback_used=False) == 0.7
 
@@ -164,6 +182,8 @@ class TestHeuristicConfidence:
             top_move="e2e4",
             top_score=0,
             selected_reason="quiet",
+            profile=HeuristicProfile.STANDARD,
+            candidate_count=1,
         )
         assert heuristic_confidence(decision, fallback_used=False) == 0.5
     def test_standard_prefers_capture_over_quiet(self) -> None:

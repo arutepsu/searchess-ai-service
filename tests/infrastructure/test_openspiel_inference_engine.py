@@ -35,10 +35,16 @@ from searchess_ai.infrastructure.inference._openspiel_chess import (
 from searchess_ai.infrastructure.inference._openspiel_mapping import (
     ReconciliationPolicy,
 )
+from searchess_ai.infrastructure.inference._openspiel_decision import (
+    HeuristicDecisionResult,
+    HeuristicProfile,
+)
 from searchess_ai.infrastructure.inference.openspiel_inference_engine import (
     OpenSpielAdapterError,
     OpenSpielInferenceEngine,
+    _build_decision_log_payload,
 )
+
 
 _START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
@@ -252,7 +258,7 @@ class TestOpenSpielInferenceEngineWired:
             )
             with pytest.raises(OpenSpielAdapterError, match="intersect_then_fail"):
                 engine.choose_move(request)
-                
+
     def test_prefers_promotion_over_quiet_move(self) -> None:
         request = _make_request(moves=["e7e8q", "e2e4"])
         decision = self._run(["e2e4", "e7e8q"], request=request)
@@ -328,6 +334,42 @@ class TestOpenSpielInferenceEngineWired:
 
         assert decision.selected_move == Move("e2e4")
         assert decision.confidence == 0.4
+
+class TestDecisionLogPayload:
+    def test_builds_structured_payload(self) -> None:
+        request = _make_request(moves=["e2e4", "d2d4"])
+        heuristic = HeuristicDecisionResult(
+            ranked_moves=["e2e4", "d2d4"],
+            top_move="e2e4",
+            top_score=0,
+            selected_reason="quiet",
+            profile=HeuristicProfile.STANDARD,
+            candidate_count=2,
+        )
+        reconciliation_result = MagicMock()
+        reconciliation_result.selected_move = Move("e2e4")
+        reconciliation_result.fallback_used = False
+
+        payload = _build_decision_log_payload(
+            request=request,
+            heuristic=heuristic,
+            reconciliation_result=reconciliation_result,
+            confidence=0.5,
+            reconciliation_policy=ReconciliationPolicy.INTERSECT_THEN_PLATFORM_FALLBACK,
+        )
+
+        assert payload["event"] == "openspiel_inference_decision"
+        assert payload["request_id"] == "req-1"
+        assert payload["match_id"] == "match-1"
+        assert payload["heuristic_profile"] == "standard"
+        assert payload["candidate_count"] == 2
+        assert payload["top_move"] == "e2e4"
+        assert payload["top_score"] == 0
+        assert payload["selected_reason"] == "quiet"
+        assert payload["selected_move"] == "e2e4"
+        assert payload["fallback_used"] is False
+        assert payload["confidence"] == 0.5
+        assert payload["reconciliation_policy"] == "intersect_then_platform_fallback"
 
 # ── Level 3: real integration (skipped unless pyspiel is installed) ───────────
 

@@ -33,6 +33,8 @@ class HeuristicDecisionResult:
     top_move: str | None
     top_score: int | None
     selected_reason: str | None
+    profile: HeuristicProfile
+    candidate_count: int
 
 
 def is_promotion_move(move: str) -> bool:
@@ -117,6 +119,8 @@ def build_heuristic_decision(
             top_move=None,
             top_score=None,
             selected_reason=None,
+            profile=profile,
+            candidate_count=0,
         )
 
     top_candidate = ranked_candidates[0]
@@ -125,6 +129,8 @@ def build_heuristic_decision(
         top_move=top_candidate.move,
         top_score=score_candidate(top_candidate, profile),
         selected_reason=_reason_for_candidate(top_candidate, profile),
+        profile=profile,
+        candidate_count=len(candidates),
     )
 
 
