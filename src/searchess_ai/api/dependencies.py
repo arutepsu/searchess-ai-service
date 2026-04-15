@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+
+from searchess_ai.application.port.inference_engine import InferenceEngine
 from searchess_ai.application.usecase.choose_move import ChooseMoveUseCase
 from searchess_ai.application.usecase.get_evaluation_job_status import GetEvaluationJobStatusUseCase
 from searchess_ai.application.usecase.get_model_detail import GetModelDetailUseCase
@@ -12,6 +15,8 @@ from searchess_ai.infrastructure.evaluation.in_memory_evaluation_job_repository 
     InMemoryEvaluationJobRepository,
 )
 from searchess_ai.infrastructure.inference.fake_inference_engine import FakeInferenceEngine
+from searchess_ai.infrastructure.inference.openspiel_inference_engine import OpenSpielInferenceEngine
+from searchess_ai.infrastructure.inference.random_inference_engine import RandomInferenceEngine
 from searchess_ai.infrastructure.model.in_memory_model_repository import InMemoryModelRepository
 from searchess_ai.infrastructure.training.fake_training_scheduler import FakeTrainingScheduler
 from searchess_ai.infrastructure.training.in_memory_training_job_repository import (
@@ -25,8 +30,22 @@ _evaluation_job_repository = InMemoryEvaluationJobRepository()
 _evaluation_scheduler = FakeEvaluationScheduler()
 
 
+def _resolve_inference_engine() -> InferenceEngine:
+    """Select the active inference backend from INFERENCE_BACKEND env var.
+
+    Accepted values: "fake" (default), "random".
+    Only the composition root reads this — routes and use cases are unaware.
+    """
+    backend = os.getenv("INFERENCE_BACKEND", "fake").lower()
+    if backend == "random":
+        return RandomInferenceEngine()
+    if backend == "openspiel":
+        return OpenSpielInferenceEngine()
+    return FakeInferenceEngine()
+
+
 def get_choose_move_use_case() -> ChooseMoveUseCase:
-    return ChooseMoveUseCase(inference_engine=FakeInferenceEngine())
+    return ChooseMoveUseCase(inference_engine=_resolve_inference_engine())
 
 
 def get_list_models_use_case() -> ListModelsUseCase:

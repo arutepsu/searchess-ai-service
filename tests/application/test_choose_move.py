@@ -1,3 +1,5 @@
+import random
+
 import pytest
 
 from searchess_ai.application.port.inference_engine import InferenceEngine
@@ -5,6 +7,7 @@ from searchess_ai.application.usecase.choose_move import ChooseMoveUseCase
 from searchess_ai.domain.game import LegalMoveSet, Move, Position, SideToMove
 from searchess_ai.domain.inference import DecisionType, InferenceDecision, InferenceRequest
 from searchess_ai.domain.model import ModelId, ModelVersion
+from searchess_ai.infrastructure.inference.random_inference_engine import RandomInferenceEngine
 
 
 def _make_request() -> InferenceRequest:
@@ -47,5 +50,27 @@ def test_use_case_returns_decision_for_valid_move() -> None:
 
 def test_use_case_raises_for_illegal_move() -> None:
     use_case = ChooseMoveUseCase(inference_engine=_IllegalMoveEngine())
+    with pytest.raises(ValueError, match="not legal"):
+        use_case.execute(_make_request())
+
+
+# --- RandomInferenceEngine through ChooseMoveUseCase ---
+
+def test_use_case_works_with_random_engine() -> None:
+    use_case = ChooseMoveUseCase(inference_engine=RandomInferenceEngine(rng=random.Random(0)))
+    decision = use_case.execute(_make_request())
+    assert decision.selected_move in [Move("e2e4"), Move("d2d4")]
+    assert decision.request_id == "req-1"
+
+
+def test_use_case_legality_check_still_enforced_regardless_of_backend() -> None:
+    """The use case's legality guard is backend-agnostic.
+    A badly behaved RandomInferenceEngine subclass still gets caught.
+    """
+    class _BadRandomEngine(RandomInferenceEngine):
+        def choose_move(self, request: InferenceRequest) -> InferenceDecision:
+            return _make_decision(request, Move("a1a8"))  # never in legal_moves
+
+    use_case = ChooseMoveUseCase(inference_engine=_BadRandomEngine())
     with pytest.raises(ValueError, match="not legal"):
         use_case.execute(_make_request())

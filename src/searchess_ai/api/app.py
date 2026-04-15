@@ -4,6 +4,7 @@ from searchess_ai.api.errors import (
     evaluation_job_not_found_handler,
     generic_error_handler,
     model_not_found_handler,
+    openspiel_adapter_error_handler,
     training_job_not_found_handler,
     value_error_handler,
 )
@@ -15,6 +16,7 @@ from searchess_ai.api.routes.training import router as training_router
 from searchess_ai.domain.evaluation import EvaluationJobNotFoundError
 from searchess_ai.domain.model import ModelNotFoundError
 from searchess_ai.domain.training import TrainingJobNotFoundError
+from searchess_ai.infrastructure.inference.openspiel_inference_engine import OpenSpielAdapterError
 
 
 def create_app() -> FastAPI:
@@ -33,6 +35,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(ModelNotFoundError, model_not_found_handler)
     app.add_exception_handler(TrainingJobNotFoundError, training_job_not_found_handler)
     app.add_exception_handler(EvaluationJobNotFoundError, evaluation_job_not_found_handler)
+    app.add_exception_handler(OpenSpielAdapterError, openspiel_adapter_error_handler)
     app.add_exception_handler(ValueError, value_error_handler)
     app.add_exception_handler(Exception, generic_error_handler)
 
