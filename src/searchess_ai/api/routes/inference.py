@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from searchess_ai.api.dependencies import get_choose_move_use_case
 from searchess_ai.api.dto.inference import (
     MoveInferenceRequestDto,
     MoveInferenceResponseDto,
@@ -10,15 +11,15 @@ from searchess_ai.application.usecase.choose_move import ChooseMoveUseCase
 from searchess_ai.domain.game import LegalMoveSet, Move, Position, SideToMove
 from searchess_ai.domain.inference import InferenceRequest
 from searchess_ai.domain.model import ModelId, ModelVersion, PolicyProfile
-from searchess_ai.infrastructure.inference.fake_inference_engine import FakeInferenceEngine
 
 router = APIRouter(tags=["inference"])
 
-_use_case = ChooseMoveUseCase(inference_engine=FakeInferenceEngine())
-
 
 @router.post("/inference/move", response_model=MoveInferenceResponseDto)
-def choose_move(request_dto: MoveInferenceRequestDto) -> MoveInferenceResponseDto:
+def choose_move(
+    request_dto: MoveInferenceRequestDto,
+    use_case: ChooseMoveUseCase = Depends(get_choose_move_use_case),
+) -> MoveInferenceResponseDto:
     request = InferenceRequest(
         request_id=request_dto.request_id,
         match_id=request_dto.match_id,
@@ -39,7 +40,7 @@ def choose_move(request_dto: MoveInferenceRequestDto) -> MoveInferenceResponseDt
         remaining_time_millis=request_dto.remaining_time_millis,
     )
 
-    decision = _use_case.execute(request)
+    decision = use_case.execute(request)
 
     return MoveInferenceResponseDto(
         request_id=decision.request_id,
