@@ -112,3 +112,49 @@ def test_random_engine_can_produce_different_moves_across_seeds() -> None:
         request = _make_request(moves=["d2d4", "e2e4"])
         decision = self._run(["d2d4", "e2e4"], request=request)
         assert decision.selected_move == Move("d2d4")
+
+        def test_sets_high_confidence_for_promotion_choice(self) -> None:
+            request = _make_request(moves=["e7e8q", "e2e4"])
+            decision = self._run(["e2e4", "e7e8q"], request=request)
+            assert decision.selected_move == Move("e7e8q")
+            assert decision.confidence == 0.9
+
+    def test_sets_base_confidence_for_quiet_choice(self) -> None:
+        request = _make_request(moves=["d2d4", "e2e4"])
+        decision = self._run(["d2d4", "e2e4"], request=request)
+        assert decision.selected_move == Move("d2d4")
+        assert decision.confidence == 0.5
+
+    def test_sets_low_confidence_when_fallback_is_used(self) -> None:
+        request = _make_request(moves=["e2e4", "d2d4"])
+        decision = self._run(["a2a3", "b2b3"], request=request)
+        assert decision.selected_move == Move("e2e4")
+        assert decision.confidence == 0.2
+
+    def test_sets_capture_confidence_when_capture_is_preferred(self) -> None:
+        class CustomState:
+            def current_player(self) -> int:
+                return 0
+
+            def legal_actions(self) -> list[int]:
+                return [0, 1]
+
+            def action_to_string(self, player: int, action: int) -> str:
+                return ["e2e4", "d4e5"][action]
+
+            def is_capture(self, player: int, action: int) -> bool:
+                return action == 1
+
+        request = _make_request(moves=["e2e4", "d4e5"])
+
+        with (
+            patch(f"{self._ENGINE_MODULE}._require_pyspiel") as mock_require,
+            patch(f"{self._ENGINE_MODULE}.load_chess_state_from_fen") as mock_load,
+        ):
+            mock_require.return_value = MagicMock()
+            mock_load.return_value = CustomState()
+            engine = OpenSpielInferenceEngine()
+            decision = engine.choose_move(request)
+
+        assert decision.selected_move == Move("d4e5")
+        assert decision.confidence == 0.7

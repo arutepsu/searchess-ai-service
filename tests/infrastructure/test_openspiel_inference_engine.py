@@ -27,7 +27,7 @@ import pytest
 
 from searchess_ai.domain.game import LegalMoveSet, Move, Position, SideToMove
 from searchess_ai.domain.inference import InferenceRequest
-from searchess_ai.domain.model import ModelId, ModelVersion
+from searchess_ai.domain.model import ModelId, ModelVersion, PolicyProfile
 from searchess_ai.infrastructure.inference._openspiel_chess import (
     get_legal_move_strings,
     select_move,
@@ -252,7 +252,82 @@ class TestOpenSpielInferenceEngineWired:
             )
             with pytest.raises(OpenSpielAdapterError, match="intersect_then_fail"):
                 engine.choose_move(request)
+                
+    def test_prefers_promotion_over_quiet_move(self) -> None:
+        request = _make_request(moves=["e7e8q", "e2e4"])
+        decision = self._run(["e2e4", "e7e8q"], request=request)
+        assert decision.selected_move == Move("e7e8q")
+        assert decision.confidence == 0.9
 
+    def test_prefers_capture_over_quiet_move_when_state_exposes_capture_info(self) -> None:
+        class CustomState:
+            def current_player(self) -> int:
+                return 0
+
+            def legal_actions(self) -> list[int]:
+                return [0, 1]
+
+            def action_to_string(self, player: int, action: int) -> str:
+                return ["e2e4", "d4e5"][action]
+
+            def is_capture(self, player: int, action: int) -> bool:
+                return action == 1
+
+        request = _make_request(moves=["e2e4", "d4e5"])
+
+        with (
+            patch(f"{self._ENGINE_MODULE}._require_pyspiel") as mock_require,
+            patch(f"{self._ENGINE_MODULE}.load_chess_state_from_fen") as mock_load,
+        ):
+            mock_require.return_value = MagicMock()
+            mock_load.return_value = CustomState()
+            engine = OpenSpielInferenceEngine()
+            decision = engine.choose_move(request)
+
+        assert decision.selected_move == Move("d4e5")
+        assert decision.confidence == 0.7
+
+    def test_sets_base_confidence_for_quiet_choice(self) -> None:
+        request = _make_request(moves=["d2d4", "e2e4"])
+        decision = self._run(["d2d4", "e2e4"], request=request)
+        assert decision.selected_move == Move("d2d4")
+        assert decision.confidence == 0.5
+
+    def test_sets_low_confidence_when_fallback_is_used(self) -> None:
+        request = _make_request(moves=["e2e4", "d2d4"])
+        decision = self._run(["a2a3", "b2b3"], request=request)
+        assert decision.selected_move == Move("e2e4")
+        assert decision.confidence == 0.2
+
+    def test_policy_profile_promotion_only_is_applied(self) -> None:
+        request = InferenceRequest(
+            request_id="req-profile-1",
+            match_id="match-1",
+            position=Position(_START_FEN),
+            side_to_move=SideToMove.WHITE,
+            legal_moves=LegalMoveSet((Move("e2e4"), Move("d4e5"), Move("e7e8q"))),
+            policy_profile=PolicyProfile("promotion_only"),
+        )
+
+        decision = self._run(["e2e4", "d4e5", "e7e8q"], request=request)
+
+        assert decision.selected_move == Move("e7e8q")
+        assert decision.confidence == 0.9
+
+    def test_policy_profile_preserve_order_is_applied(self) -> None:
+        request = InferenceRequest(
+            request_id="req-profile-2",
+            match_id="match-1",
+            position=Position(_START_FEN),
+            side_to_move=SideToMove.WHITE,
+            legal_moves=LegalMoveSet((Move("e2e4"), Move("d4e5"), Move("e7e8q"))),
+            policy_profile=PolicyProfile("preserve_order"),
+        )
+
+        decision = self._run(["e2e4", "d4e5", "e7e8q"], request=request)
+
+        assert decision.selected_move == Move("e2e4")
+        assert decision.confidence == 0.4
 
 # ── Level 3: real integration (skipped unless pyspiel is installed) ───────────
 

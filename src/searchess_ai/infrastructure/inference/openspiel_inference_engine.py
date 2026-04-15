@@ -24,7 +24,11 @@ from searchess_ai.infrastructure.inference._openspiel_chess import (
     get_legal_move_candidates,
     load_chess_state_from_fen,
 )
-from searchess_ai.infrastructure.inference._openspiel_decision import ordered_move_strings
+from searchess_ai.infrastructure.inference._openspiel_decision import (
+    HeuristicProfile,
+    build_heuristic_decision,
+    heuristic_confidence,
+)
 from searchess_ai.infrastructure.inference._openspiel_mapping import (
     MoveReconciliationResult,
     ReconciliationPolicy,
@@ -37,7 +41,22 @@ from searchess_ai.infrastructure.inference._openspiel_mapping import (
 from searchess_ai.infrastructure.inference._openspiel_mapping import (  # noqa: F401
     OpenSpielAdapterError,
 )
+def _resolve_heuristic_profile(policy_profile: object) -> HeuristicProfile:
+    """
+    Map request policy_profile into an internal heuristic profile.
 
+    Unknown values fall back conservatively to STANDARD.
+    """
+    if policy_profile is None:
+        return HeuristicProfile.STANDARD
+
+    value = getattr(policy_profile, "value", str(policy_profile)).strip().lower()
+
+    if value == HeuristicProfile.PROMOTION_ONLY.value:
+        return HeuristicProfile.PROMOTION_ONLY
+    if value == HeuristicProfile.PRESERVE_ORDER.value:
+        return HeuristicProfile.PRESERVE_ORDER
+    return HeuristicProfile.STANDARD
 
 def _require_pyspiel() -> Any:
     """Return the pyspiel module, or raise OpenSpielAdapterError if absent."""
@@ -79,7 +98,8 @@ class OpenSpielInferenceEngine(InferenceEngine):
             validate_fen(fen)
             state = load_chess_state_from_fen(pyspiel, fen)
             candidates = get_legal_move_candidates(state)
-            ranked_moves = ordered_move_strings(candidates)
+            heuristic_profile = _resolve_heuristic_profile(request.policy_profile)
+            heuristic = build_heuristic_decision(candidates, heuristic_profile)
         except OpenSpielAdapterError:
             raise
         except Exception as exc:
@@ -88,7 +108,7 @@ class OpenSpielInferenceEngine(InferenceEngine):
             ) from exc
 
         result: MoveReconciliationResult = reconcile_moves(
-            ranked_moves,
+            heuristic.ranked_moves,
             request.legal_moves,
             self.reconciliation_policy,
         )
@@ -101,4 +121,5 @@ class OpenSpielInferenceEngine(InferenceEngine):
             model_version=request.model_version or self.default_model_version,
             decision_time_millis=0,
             policy_profile=request.policy_profile,
+            confidence=heuristic_confidence(heuristic, result.fallback_used),
         )
