@@ -1,7 +1,17 @@
 [project]
 name = "searchess-ai-service"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI service for Searchess."
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+"fastapi",
+"uvicorn",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/searchess_ai"]

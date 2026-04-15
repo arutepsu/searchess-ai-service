@@ -15,6 +15,19 @@ Key principles:
 
 ---
 
+## v1 Endpoint Surface
+
+- GET /api/v1/health
+- POST /api/v1/inference/move
+- GET /api/v1/models
+- GET /api/v1/models/{modelId}
+- POST /api/v1/training/jobs
+- GET /api/v1/training/jobs/{trainingJobId}
+- POST /api/v1/evaluation/jobs
+- GET /api/v1/evaluation/jobs/{evaluationJobId}
+
+---
+
 ## Contract Design Principles
 
 ### 1. Platform-facing, not library-facing
