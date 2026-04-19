@@ -1,0 +1,9 @@
+services:
+  ai-service:
+    build: .
+    ports:
+      - "8765:8765"
+    environment:
+      # "random" picks a legal move at random.
+      # Change to "fake" for deterministic first-move responses.
+      INFERENCE_BACKEND: random

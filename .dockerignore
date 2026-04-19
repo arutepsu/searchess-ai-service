@@ -1,0 +1,10 @@
+.git/
+.idea/
+.venv/
+.pytest_cache/
+tests/
+docs/
+*.pyc
+__pycache__/
+uv.lock
+.python-version
