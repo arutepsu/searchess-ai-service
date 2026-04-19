@@ -14,13 +14,22 @@ from searchess_ai.application.usecase.choose_move import ChooseMoveUseCase
 from searchess_ai.infrastructure.inference.fake_inference_engine import FakeInferenceEngine
 from searchess_ai.infrastructure.inference.random_inference_engine import RandomInferenceEngine
 
+_START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
 _VALID_PAYLOAD = {
-    "request_id": "req-1",
-    "match_id": "match-1",
-    "board_state": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-    "side_to_move": "white",
-    "legal_moves": ["e2e4", "d2d4"],
+    "requestId": "550e8400-e29b-41d4-a716-446655440000",
+    "gameId": "123e4567-e89b-12d3-a456-426614174000",
+    "sessionId": "789abcde-f012-3456-b789-abcdef012345",
+    "sideToMove": "white",
+    "fen": _START_FEN,
+    "legalMoves": [
+        {"from": "e2", "to": "e4"},
+        {"from": "d2", "to": "d4"},
+    ],
+    "limits": {"timeoutMillis": 3000},
 }
+
+_URL = "/v1/move-suggestions"
 
 
 # --- Composition root unit tests ---
@@ -48,23 +57,21 @@ def test_resolve_is_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
 # --- API integration: endpoint unchanged when backend changes ---
 
 def test_inference_endpoint_works_with_random_backend() -> None:
-    """Backend swapped via dependency_overrides — route and use case unchanged."""
     app = create_app()
     app.dependency_overrides[get_choose_move_use_case] = lambda: ChooseMoveUseCase(
         inference_engine=RandomInferenceEngine(rng=random.Random(0))
     )
     with TestClient(app) as c:
-        response = c.post("/api/v1/inference/move", json=_VALID_PAYLOAD)
+        response = c.post(_URL, json=_VALID_PAYLOAD)
     assert response.status_code == 200
     body = response.json()
-    assert body["selected_move"] in ["e2e4", "d2d4"]
-    assert body["request_id"] == "req-1"
-    assert body["decision_type"] == "move"
-    assert body["model_id"] == "random-engine"
+    legal = {f"{m['from']}{m['to']}" for m in _VALID_PAYLOAD["legalMoves"]}
+    assert f"{body['move']['from']}{body['move']['to']}" in legal
+    assert body["requestId"] == _VALID_PAYLOAD["requestId"]
+    assert body["engineId"] == "random-engine"
 
 
 def test_inference_response_shape_identical_across_backends() -> None:
-    """Both backends return the same DTO shape — the contract is stable."""
     fake_app = create_app()
     fake_app.dependency_overrides[get_choose_move_use_case] = lambda: ChooseMoveUseCase(
         inference_engine=FakeInferenceEngine()
@@ -73,21 +80,20 @@ def test_inference_response_shape_identical_across_backends() -> None:
     random_app.dependency_overrides[get_choose_move_use_case] = lambda: ChooseMoveUseCase(
         inference_engine=RandomInferenceEngine(rng=random.Random(0))
     )
-
     with TestClient(fake_app) as fc, TestClient(random_app) as rc:
-        fake_body = fc.post("/api/v1/inference/move", json=_VALID_PAYLOAD).json()
-        random_body = rc.post("/api/v1/inference/move", json=_VALID_PAYLOAD).json()
-
+        fake_body = fc.post(_URL, json=_VALID_PAYLOAD).json()
+        random_body = rc.post(_URL, json=_VALID_PAYLOAD).json()
     assert set(fake_body.keys()) == set(random_body.keys())
 
 
 def test_inference_endpoint_works_with_env_var_random_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Backend selected via env var — composition root reads it at call time."""
     monkeypatch.setenv("INFERENCE_BACKEND", "random")
     app = create_app()
     with TestClient(app) as c:
-        response = c.post("/api/v1/inference/move", json=_VALID_PAYLOAD)
+        response = c.post(_URL, json=_VALID_PAYLOAD)
     assert response.status_code == 200
-    assert response.json()["selected_move"] in ["e2e4", "d2d4"]
+    legal = {f"{m['from']}{m['to']}" for m in _VALID_PAYLOAD["legalMoves"]}
+    body = response.json()
+    assert f"{body['move']['from']}{body['move']['to']}" in legal

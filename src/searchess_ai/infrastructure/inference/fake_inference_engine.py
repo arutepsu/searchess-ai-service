@@ -9,10 +9,7 @@ from searchess_ai.domain.inference import (
     InferenceRequest,
 )
 from searchess_ai.domain.model import ModelId, ModelVersion
-from searchess_ai.infrastructure.inference._openspiel_decision import (
-    build_heuristic_decision,
-    heuristic_confidence,
-)
+
 
 @dataclass(slots=True)
 class FakeInferenceEngine(InferenceEngine):

@@ -1,8 +1,10 @@
 from fastapi import FastAPI
 
 from searchess_ai.api.errors import (
+    InferenceContractError,
     evaluation_job_not_found_handler,
     generic_error_handler,
+    inference_contract_error_handler,
     model_not_found_handler,
     openspiel_adapter_error_handler,
     training_job_not_found_handler,
@@ -26,12 +28,21 @@ def create_app() -> FastAPI:
         description="AI service for Searchess.",
     )
 
-    app.include_router(health_router, prefix="/api/v1")
-    app.include_router(inference_router, prefix="/api/v1")
+    # Contract-compliant inference routes at /v1
+    app.include_router(inference_router, prefix="/v1")
+
+    # Infrastructure health check at /health (no version prefix)
+    app.include_router(health_router, prefix="")
+
+    # Non-inference routes unchanged
     app.include_router(models_router, prefix="/api/v1")
     app.include_router(training_router, prefix="/api/v1")
     app.include_router(evaluation_router, prefix="/api/v1")
 
+    # Contract error handler for inference routes
+    app.add_exception_handler(InferenceContractError, inference_contract_error_handler)
+
+    # Legacy handlers for non-inference routes
     app.add_exception_handler(ModelNotFoundError, model_not_found_handler)
     app.add_exception_handler(TrainingJobNotFoundError, training_job_not_found_handler)
     app.add_exception_handler(EvaluationJobNotFoundError, evaluation_job_not_found_handler)
