@@ -23,6 +23,7 @@ from searchess_ai.api.errors import (
     InferenceContractError,
     inference_error_response,
 )
+from searchess_ai.api.routes import _test_hook
 from searchess_ai.application.usecase.choose_move import ChooseMoveUseCase
 from searchess_ai.domain.game import LegalMoveSet, Move, Position, SideToMove
 from searchess_ai.domain.inference import InferenceRequest
@@ -75,6 +76,13 @@ async def suggest_move(
             status_code=400,
             content={"requestId": request_id, "code": "BAD_REQUEST", "message": first_msg},
         )
+
+    # Integration test hook — short-circuits normal inference when testMode is set.
+    # Unknown values fall through to normal behavior unchanged.
+    if dto.metadata and dto.metadata.test_mode == "illegal_move":
+        return _test_hook.illegal_move_response(dto)
+    if dto.metadata and dto.metadata.test_mode == "malformed_response":
+        return _test_hook.malformed_response(dto)
 
     timeout_seconds = dto.limits.timeout_millis / 1000.0
     started_at = time.monotonic()

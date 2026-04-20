@@ -54,6 +54,9 @@ class ExecutionLimitsDto(BaseModel):
 class RequestMetadataDto(BaseModel):
     model_config = _CAMEL
     mode: str | None = None
+    # Integration test hook only — see docs/test-hook.md.
+    # Supported: "illegal_move", "malformed_response". Unknown values are ignored.
+    test_mode: str | None = None
 
 
 # ---------------------------------------------------------------------------
