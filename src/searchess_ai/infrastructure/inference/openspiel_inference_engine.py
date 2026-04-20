@@ -41,6 +41,7 @@ from searchess_ai.infrastructure.inference._openspiel_mapping import (
     validate_fen,
 )
 from searchess_ai.infrastructure.inference._openspiel_mapping import (  # noqa: F401
+    BadPositionAdapterError,
     OpenSpielAdapterError,
 )
 

@@ -55,6 +55,11 @@ class OpenSpielAdapterError(Exception):
     """
 
 
+class BadPositionAdapterError(OpenSpielAdapterError):
+    """Raised specifically when the FEN string is structurally invalid or
+    the position cannot be loaded — maps to BAD_POSITION (422) at the HTTP boundary."""
+
+
 # ── Position format validation ──────────────────────────────────────────────
 
 _FEN_MIN_FIELDS = 2  # board field + side-to-move; clock fields are optional
@@ -73,26 +78,26 @@ def validate_fen(fen: str) -> None:
     castling rights, or en-passant square consistency.
     """
     if not fen or not fen.strip():
-        raise OpenSpielAdapterError(
+        raise BadPositionAdapterError(
             "Unsupported position format: FEN string is empty. "
             "Position must be a valid FEN string produced by the platform."
         )
     parts = fen.strip().split()
     if len(parts) < _FEN_MIN_FIELDS:
-        raise OpenSpielAdapterError(
+        raise BadPositionAdapterError(
             f"Unsupported position format: expected at least {_FEN_MIN_FIELDS} "
             f"FEN fields (board + side-to-move), got {len(parts)}. "
             f"Input: {fen!r}"
         )
     board_field, side_field = parts[0], parts[1]
     if board_field.count("/") != 7:
-        raise OpenSpielAdapterError(
+        raise BadPositionAdapterError(
             f"Unsupported position format: FEN board field must contain exactly "
             f"7 rank separators ('/'), got {board_field.count('/')}. "
             f"Input: {fen!r}"
         )
     if side_field not in ("w", "b"):
-        raise OpenSpielAdapterError(
+        raise BadPositionAdapterError(
             f"Unsupported position format: FEN side-to-move must be 'w' or 'b', "
             f"got {side_field!r}. Input: {fen!r}"
         )

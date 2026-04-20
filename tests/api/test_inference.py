@@ -211,3 +211,94 @@ def test_response_shape_identical_across_backends() -> None:
         fake_body = fc.post(_URL, json=_VALID_PAYLOAD).json()
         random_body = rc.post(_URL, json=_VALID_PAYLOAD).json()
     assert set(fake_body.keys()) == set(random_body.keys())
+
+
+# ---------------------------------------------------------------------------
+# Error contract — engine failure scenarios
+# ---------------------------------------------------------------------------
+
+def _app_with_engine(engine_factory: object) -> TestClient:
+    """Return a TestClient whose inference engine is replaced by engine_factory()."""
+    from searchess_ai.application.port.inference_engine import InferenceEngine
+    from searchess_ai.domain.inference import InferenceDecision
+
+    class _EngineWrapper(InferenceEngine):
+        def choose_move(self, request):  # type: ignore[override]
+            return engine_factory(request)  # type: ignore[call-arg]
+
+    app = create_app()
+    app.dependency_overrides[get_choose_move_use_case] = lambda: ChooseMoveUseCase(
+        inference_engine=_EngineWrapper()
+    )
+    return TestClient(app)
+
+
+def test_bad_position_returns_422_bad_position() -> None:
+    from searchess_ai.infrastructure.inference._openspiel_mapping import BadPositionAdapterError
+
+    def _raise(_req):  # type: ignore[misc]
+        raise BadPositionAdapterError("invalid FEN: missing rank separators")
+
+    with _app_with_engine(_raise) as c:
+        resp = c.post(_URL, json=_VALID_PAYLOAD)
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["code"] == "BAD_POSITION"
+    assert body["requestId"] == _REQUEST_ID
+    assert "message" in body
+
+
+def test_engine_unavailable_returns_503() -> None:
+    from searchess_ai.infrastructure.inference._openspiel_mapping import OpenSpielAdapterError
+
+    def _raise(_req):  # type: ignore[misc]
+        raise OpenSpielAdapterError("pyspiel is not installed. Set INFERENCE_BACKEND=fake")
+
+    with _app_with_engine(_raise) as c:
+        resp = c.post(_URL, json=_VALID_PAYLOAD)
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["code"] == "ENGINE_UNAVAILABLE"
+    assert body["requestId"] == _REQUEST_ID
+
+
+def test_engine_failure_returns_500() -> None:
+    def _raise(_req):  # type: ignore[misc]
+        raise RuntimeError("internal engine crash")
+
+    with _app_with_engine(_raise) as c:
+        resp = c.post(_URL, json=_VALID_PAYLOAD)
+
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["code"] == "ENGINE_FAILURE"
+    assert body["requestId"] == _REQUEST_ID
+
+
+def test_openspiel_non_availability_error_returns_503() -> None:
+    """OpenSpielAdapterError with 'not installed' anywhere in the message → 503."""
+    from searchess_ai.infrastructure.inference._openspiel_mapping import OpenSpielAdapterError
+
+    def _raise(_req):  # type: ignore[misc]
+        raise OpenSpielAdapterError("pyspiel is Not Installed on this platform")
+
+    with _app_with_engine(_raise) as c:
+        resp = c.post(_URL, json=_VALID_PAYLOAD)
+
+    assert resp.status_code == 503
+
+
+def test_openspiel_other_error_returns_500() -> None:
+    """OpenSpielAdapterError without 'not installed' → 500 ENGINE_FAILURE."""
+    from searchess_ai.infrastructure.inference._openspiel_mapping import OpenSpielAdapterError
+
+    def _raise(_req):  # type: ignore[misc]
+        raise OpenSpielAdapterError("reconciliation policy failure")
+
+    with _app_with_engine(_raise) as c:
+        resp = c.post(_URL, json=_VALID_PAYLOAD)
+
+    assert resp.status_code == 500
+    assert resp.json()["code"] == "ENGINE_FAILURE"
