@@ -70,12 +70,12 @@ src/searchess_ai/
   infrastructure/  # OpenSpiel + technical integrations
 ```
 
-Relation to Platform
+## Relation to Platform
 
 This service will be called by the Searchess platform via:
 
-move inference requests
-model queries
-(later) training/evaluation triggers
+- move inference requests
+- model queries
+- (later) training/evaluation triggers
 
 The platform remains authoritative for all official matches.

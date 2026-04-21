@@ -33,7 +33,12 @@ _evaluation_scheduler = FakeEvaluationScheduler()
 def _resolve_inference_engine() -> InferenceEngine:
     """Select the active inference backend from INFERENCE_BACKEND env var.
 
-    Accepted values: "fake" (default), "random".
+    Accepted values:
+      "fake" (default) — always returns first legal move
+      "random"         — uniformly random legal move
+      "openspiel"      — OpenSpiel heuristic engine
+      "supervised"     — trained supervised policy model
+                         requires MODEL_ARTIFACT_DIR env var pointing to an artifact directory
     Only the composition root reads this — routes and use cases are unaware.
     """
     backend = os.getenv("INFERENCE_BACKEND", "fake").lower()
@@ -41,6 +46,19 @@ def _resolve_inference_engine() -> InferenceEngine:
         return RandomInferenceEngine()
     if backend == "openspiel":
         return OpenSpielInferenceEngine()
+    if backend == "supervised":
+        from pathlib import Path
+
+        from searchess_ai.infrastructure.inference.supervised_inference_engine import (
+            SupervisedInferenceEngine,
+        )
+
+        artifact_dir = os.getenv("MODEL_ARTIFACT_DIR", "")
+        if not artifact_dir:
+            raise RuntimeError(
+                "INFERENCE_BACKEND=supervised requires MODEL_ARTIFACT_DIR to be set."
+            )
+        return SupervisedInferenceEngine(artifact_dir=Path(artifact_dir))
     return FakeInferenceEngine()
 
 

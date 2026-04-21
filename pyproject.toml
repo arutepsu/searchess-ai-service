@@ -5,9 +5,24 @@ description = "AI service for Searchess."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-"fastapi",
-"uvicorn",
+    "fastapi",
+    "uvicorn",
 ]
+
+[project.optional-dependencies]
+# Install to use dataset pipeline, training, and supervised inference backend.
+# torch is listed separately because it requires an index-url on some platforms.
+training = [
+    "python-chess>=1.999",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+    "torch>=2.0",
+]
+
+[project.scripts]
+prepare-dataset = "searchess_ai.data_pipeline.pipeline:main"
+train-model = "searchess_ai.training.pipeline:main"
 
 [dependency-groups]
 dev = [
