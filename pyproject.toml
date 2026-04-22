@@ -22,7 +22,10 @@ training = [
 
 [project.scripts]
 prepare-dataset = "searchess_ai.data_pipeline.pipeline:main"
+prepare-puzzle-dataset = "searchess_ai.data_pipeline.puzzle_pipeline:main"
+prepare-full-game-dataset = "searchess_ai.data_pipeline.full_game_pipeline:main"
 train-model = "searchess_ai.training.pipeline:main"
+evaluate-trained-model = "searchess_ai.evaluation.game_play:main"
 
 [dependency-groups]
 dev = [
