@@ -1,0 +1,44 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.6"
+
+      - name: Install dependencies with training extras
+        # Training extras (python-chess, numpy, torch) are required for encoder
+        # validation, loader validation, and the artifact integration test.
+        # Without this step, those test files would be skipped via importorskip.
+        run: uv sync --extra training --dev --locked
+
+      - name: Run full test suite
+        run: uv run pytest tests/ -v --tb=short
+
+      - name: Verify critical tests ran (encoder drift + loader validation + integration)
+        # This step runs the training-dependent test files in isolation.
+        # With training extras installed (above), they pass with exit code 0.
+        # If training extras were missing, importorskip would cause exit code 5
+        # (no tests collected), which fails this step — enforcing CI coverage.
+        run: |
+          uv run pytest \
+            tests/model_runtime/test_encoder_stability.py \
+            tests/model_runtime/test_loader_validation.py \
+            tests/model_runtime/test_artifact_integration.py \
+            -v --tb=short

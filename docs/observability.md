@@ -97,7 +97,7 @@ Aggregate log search: `grep '"event": "counters_snapshot"'`
 ### At startup
 
 ```json
-{"event": "supervised_engine_loaded", "model_version": "...", "artifact_id": "...", "encoder_version": "..."}
+{"event": "supervised_engine_loaded", "model_version": "...", "artifact_id": "...", "encoder_version": "...", "move_encoder_version": "..."}
 ```
 
 ### Reload
@@ -148,11 +148,15 @@ An artifact is rejected at load time if any check fails:
 | Check | Error type | When triggered |
 |---|---|---|
 | `manifest.json` absent | `FileNotFoundError` | Path wrong or partial write |
-| Required manifest field missing | `ValueError` | Incomplete artifact |
-| `encoder_config.version` mismatch | `ValueError` | Encoder version bumped without re-training |
+| Required manifest field missing | `ValueError` | Incomplete or old-format artifact |
+| `move_encoder_config` absent | `ValueError` | Old fixed-vocabulary artifact — re-train required |
+| `encoder_config.version` mismatch | `ValueError` | Position encoder version bumped without re-training |
 | `encoder_config.fingerprint` mismatch | `ValueError` | `encode_fen()` changed without bumping version |
 | `encoder_config.feature_size` mismatch | `ValueError` | Constants changed |
-| `encoder_config.move_vocab_size` mismatch | `ValueError` | Constants changed |
+| `move_encoder_config.version` mismatch | `ValueError` | Move encoder version bumped without re-training |
+| `move_encoder_config.fingerprint` mismatch | `ValueError` | `encode_move()` changed without bumping version |
+| `move_encoder_config.move_feature_size` mismatch | `ValueError` | Constants changed |
+| `model_config.architecture` != `MoveScoringNetwork` | `ValueError` | Old `PolicyNetwork` artifact — re-train required |
 | `model_config` missing required keys | `ValueError` | Incomplete or old artifact |
 | `model.pt` absent | `FileNotFoundError` | Partial write |
 
@@ -160,43 +164,40 @@ An artifact is rejected at load time if any check fails:
 
 ## Encoder versioning and drift protection
 
-### Two-layer protection
+### Position encoder — two-layer protection
 
-**Layer 1 — Version string (`ENCODER_VERSION`)**
-A manual semver-style tag bumped when the encoder is intentionally changed.
-Catches intentional changes but is only as reliable as the developer remembering to bump it.
+**Layer 1 — Version string (`ENCODER_VERSION` in `encoder.py`)**
+Bumped when `encode_fen()` is intentionally changed.
 
 **Layer 2 — Behavioral fingerprint (`compute_encoder_fingerprint`)**
-A SHA-256 of the sorted non-zero feature indices when encoding the reference starting position.
-Computed at training time and stored in every artifact's `encoder_config.fingerprint`.
-Re-computed at artifact load time and compared.
+SHA-256 of the sorted non-zero feature indices on the reference starting FEN.
+Stored in every artifact's `encoder_config.fingerprint`. Re-verified at load time.
+Catches drift even when the version string is not bumped.
 
-If `encode_fen()` changes but `ENCODER_VERSION` is not bumped, the fingerprint check still
-catches the drift at load time — before any wrong predictions can be made.
+### Move encoder — same two-layer protection
 
-### Automated test coverage
+**Layer 1 — `MOVE_ENCODER_VERSION` in `move_encoder.py`**
+Bumped when `encode_move()` is intentionally changed.
 
-`tests/model_runtime/test_encoder_stability.py` contains:
+**Layer 2 — `compute_move_encoder_fingerprint`**
+SHA-256 of the sorted non-zero indices on the reference move (`e2e4`).
+Stored in every artifact's `move_encoder_config.fingerprint`. Re-verified at load time.
 
-| Test | What it catches |
-|---|---|
-| `test_verify_encoder_stable_passes` | Any deviation from `_REFERENCE_NONZERO_INDICES` |
-| `test_reference_nonzero_indices_match_encode_fen` | Specific added/removed indices (human-readable diff) |
-| `test_nonzero_count_for_starting_position` | Wrong number of set features (layout shift) |
-| `test_feature_values_are_binary` | Non-binary feature values introduced |
-| `test_fingerprint_is_deterministic` | Nondeterminism in encoder |
-| `test_different_positions_have_different_fingerprints` | Collapsed encoding |
-| `TestEncoderPiecePlanes.*` | Wrong plane assignment per piece type/color |
-| `test_side_to_move_index_772` | Side-to-move bit at wrong index or inverted |
+### How to update the position encoder intentionally
 
-### How to update the encoder intentionally
+1. Change `encode_fen()`.
+2. Run `python -m searchess_ai.model_runtime.encoder` to see the new fingerprint.
+3. Update `_REFERENCE_NONZERO_INDICES` in `encoder.py`.
+4. Bump `ENCODER_VERSION`.
+5. Run `pytest tests/model_runtime/test_encoder_stability.py`.
+6. Re-run dataset → train pipeline. All existing artifacts will be rejected until re-trained.
 
-1. Make the change to `encode_fen()`.
-2. Run `python -m searchess_ai.model_runtime.encoder` to see the new fingerprint and verify the stability check output.
-3. Update `_REFERENCE_NONZERO_INDICES` in `encoder.py` to match the new output.
-4. Bump `ENCODER_VERSION` (e.g. `"1.0"` → `"2.0"`).
-5. Run `pytest tests/model_runtime/test_encoder_stability.py` — all tests must pass.
-6. Re-run the full dataset → train pipeline.  All existing artifacts will be rejected until re-trained.
+### How to update the move encoder intentionally
+
+1. Change `encode_move()` in `move_encoder.py`.
+2. Bump `MOVE_ENCODER_VERSION`.
+3. Run `pytest tests/model_runtime/test_move_encoder.py`.
+4. Re-run dataset → train pipeline. All existing artifacts will be rejected until re-trained.
 
 ---
 

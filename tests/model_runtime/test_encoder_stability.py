@@ -18,12 +18,10 @@ np = pytest.importorskip("numpy", reason="numpy not installed (run: uv sync --ex
 from searchess_ai.model_runtime.encoder import (
     ENCODER_VERSION,
     FEATURE_SIZE,
-    MOVE_VOCAB_SIZE,
     REFERENCE_FEN,
     _REFERENCE_NONZERO_INDICES,
     compute_encoder_fingerprint,
     encode_fen,
-    encode_uci_move,
     verify_encoder_stable,
 )
 
@@ -184,28 +182,3 @@ class TestEncoderPiecePlanes:
                 )
 
 
-# ---------------------------------------------------------------------------
-# Move encoding
-# ---------------------------------------------------------------------------
-
-
-class TestMoveEncoding:
-    def test_e2e4_encodes_correctly(self):
-        # e2=12, e4=28; index = 12*64+28 = 796
-        assert encode_uci_move("e2e4") == 12 * 64 + 28
-
-    def test_promotion_strips_piece(self):
-        # e7e8q and e7e8r must map to the same index
-        assert encode_uci_move("e7e8q") == encode_uci_move("e7e8r")
-
-    def test_invalid_uci_raises(self):
-        with pytest.raises(ValueError):
-            encode_uci_move("notvalid")
-
-    def test_move_vocab_size(self):
-        # All squares-to-squares produce valid indices
-        assert MOVE_VOCAB_SIZE == 4096
-        for fr in range(64):
-            for to in range(64):
-                idx = fr * 64 + to
-                assert 0 <= idx < MOVE_VOCAB_SIZE

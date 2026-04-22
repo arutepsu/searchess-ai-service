@@ -47,6 +47,7 @@ REQUIRED_MANIFEST_FIELDS: frozenset[str] = frozenset(
         "training_run_id",
         "model_config",
         "encoder_config",
+        "move_encoder_config",
         "dataset_ref",
         "training_run",
         "evaluation_summary",
@@ -64,6 +65,7 @@ class ArtifactManifest:
     training_run_id: str
     model_config: dict[str, Any]
     encoder_config: dict[str, Any]
+    move_encoder_config: dict[str, Any]
     dataset_ref: dict[str, Any]
     training_run: dict[str, Any]
     evaluation_summary: dict[str, Any]
@@ -76,6 +78,7 @@ class ArtifactManifest:
         training_run_id: str,
         model_config: dict[str, Any],
         encoder_config: dict[str, Any],
+        move_encoder_config: dict[str, Any],
         dataset_ref: dict[str, Any],
         training_run: dict[str, Any],
         evaluation_summary: dict[str, Any],
@@ -89,6 +92,7 @@ class ArtifactManifest:
             training_run_id=training_run_id,
             model_config=model_config,
             encoder_config=encoder_config,
+            move_encoder_config=move_encoder_config,
             dataset_ref=dataset_ref,
             training_run=training_run,
             evaluation_summary=evaluation_summary,

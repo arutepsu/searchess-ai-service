@@ -165,6 +165,7 @@ class SupervisedInferenceEngine(InferenceEngine):
                             "model_version": meta.model_version if meta else "unknown",
                             "artifact_id": meta.artifact_id if meta else "unknown",
                             "encoder_version": meta.encoder_version if meta else "unknown",
+                            "move_encoder_version": meta.move_encoder_version if meta else "unknown",
                         }
                     )
                 )

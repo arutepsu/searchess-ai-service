@@ -24,9 +24,10 @@ except ImportError as exc:
 from searchess_ai.artifacts.schema import ArtifactManifest, save_artifact
 from searchess_ai.evaluation.report import compute_report
 from searchess_ai.model_runtime.encoder import encoder_config
+from searchess_ai.model_runtime.move_encoder import move_encoder_config
 from searchess_ai.training.config import TrainingConfig
-from searchess_ai.training.dataset import load_dataset_metadata, load_splits
-from searchess_ai.training.model import PolicyNetwork
+from searchess_ai.training.dataset import load_dataset_metadata, load_splits, move_scoring_collate
+from searchess_ai.training.model import MoveScoringNetwork
 from searchess_ai.training.trainer import evaluate_epoch, train_epoch
 
 
@@ -56,12 +57,30 @@ def run_training(config: TrainingConfig) -> Path:
         f"[training] Samples — train: {len(train_ds)}, val: {len(val_ds)}, test: {len(test_ds)}"
     )
 
-    train_loader = DataLoader(train_ds, batch_size=config.batch_size, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=config.batch_size, shuffle=False, num_workers=0)
-    test_loader = DataLoader(test_ds, batch_size=config.batch_size, shuffle=False, num_workers=0)
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=config.batch_size,
+        shuffle=True,
+        num_workers=0,
+        collate_fn=move_scoring_collate,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=config.batch_size,
+        shuffle=False,
+        num_workers=0,
+        collate_fn=move_scoring_collate,
+    )
+    test_loader = DataLoader(
+        test_ds,
+        batch_size=config.batch_size,
+        shuffle=False,
+        num_workers=0,
+        collate_fn=move_scoring_collate,
+    )
 
     # --- Model ---
-    model = PolicyNetwork(
+    model = MoveScoringNetwork(
         hidden_size=config.hidden_size,
         num_hidden_layers=config.num_hidden_layers,
         dropout=config.dropout,
@@ -94,7 +113,6 @@ def run_training(config: TrainingConfig) -> Path:
             best_val_loss = val_metrics["loss"]
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
-    # Restore best checkpoint before final evaluation
     if best_state is not None:
         model.load_state_dict(best_state)
 
@@ -102,13 +120,13 @@ def run_training(config: TrainingConfig) -> Path:
     test_metrics = evaluate_epoch(model, test_loader, device)
     print(
         f"[training] Test — loss: {test_metrics['loss']:.4f}, "
-        f"top1: {test_metrics['top1']:.4f}, "
-        f"top5: {test_metrics['top5']:.4f}"
+        f"top1: {test_metrics['top1']:.4f}"
     )
 
-    # --- Artifact identity (known before weights are finalised) ---
-    model_version = f"v{config.run_id}"
+    # --- Encoder configs ---
     enc_cfg = encoder_config()
+    move_enc_cfg = move_encoder_config()
+    model_version = f"v{config.run_id}"
 
     # --- Evaluation report ---
     report = compute_report(
@@ -123,6 +141,7 @@ def run_training(config: TrainingConfig) -> Path:
         dataset_id=dataset_version,
         model_version=model_version,
         encoder_version=enc_cfg["version"],
+        move_encoder_version=move_enc_cfg["version"],
     )
 
     # --- Artifact ---
@@ -134,6 +153,7 @@ def run_training(config: TrainingConfig) -> Path:
         training_run_id=config.run_id,
         model_config=model.config(),
         encoder_config=enc_cfg,
+        move_encoder_config=move_enc_cfg,
         dataset_ref={
             "dataset_id": dataset_version,
             "dataset_dir": str(config.dataset_dir),
@@ -161,13 +181,13 @@ def _seed_everything(seed: int) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Train baseline supervised chess policy model.")
+    parser = argparse.ArgumentParser(description="Train move-scoring supervised chess policy.")
     parser.add_argument("--dataset-dir", required=True, help="Prepared dataset directory")
     parser.add_argument("--output-dir", required=True, help="Directory to write artifact")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
-    parser.add_argument("--hidden-size", type=int, default=512)
+    parser.add_argument("--hidden-size", type=int, default=256)
     parser.add_argument("--num-hidden-layers", type=int, default=2)
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--device", default="cpu")

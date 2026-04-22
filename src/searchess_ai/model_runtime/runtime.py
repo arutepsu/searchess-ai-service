@@ -1,9 +1,18 @@
-"""Supervised model runtime — scores and selects from legal moves.
+"""Move-scoring runtime — scores and selects from legal moves directly.
 
 Every call to select_move() returns a RuntimeDecision.
 No path is silent: every fallback carries a FallbackReason and optional
-error_detail for logs. The calling engine is responsible for logging
-and for deciding whether to surface the decision_mode to the API layer.
+error_detail for logs.
+
+The inference procedure
+-----------------------
+1. Encode the position (FEN → float32 vector via encoder.py).
+2. Encode each legal move (UCI → float32 vector via move_encoder.py).
+3. Score all legal moves jointly (MoveScoringNetwork forward pass).
+4. Return the highest-scoring legal move with its softmax confidence.
+
+No fixed vocabulary. No masking. Each legal move is scored directly.
+Underpromotions are distinct from queen promotions.
 """
 
 from __future__ import annotations
@@ -13,13 +22,10 @@ from searchess_ai.model_runtime.decision import (
     FallbackReason,
     RuntimeDecision,
 )
-from searchess_ai.model_runtime.encoder import encode_fen, encode_uci_move
+from searchess_ai.model_runtime.encoder import encode_fen
 from searchess_ai.model_runtime.loader import LoadedModel
+from searchess_ai.model_runtime.move_encoder import encode_moves
 
-# Promotion piece priority: prefer queen, then rook, then bishop, then knight.
-_PROMO_PRIORITY = {"q": 0, "r": 1, "b": 2, "n": 3, "": 4}
-
-# Maximum characters from an exception message included in error_detail.
 _ERROR_DETAIL_MAX_LEN = 300
 
 
@@ -30,7 +36,9 @@ class SupervisedModelRuntime:
         self._loaded = loaded
         try:
             import torch
+            import torch.nn.functional as F
             self._torch = torch
+            self._F = F
         except ImportError as exc:
             raise ImportError(
                 "torch is required. Install training extras: uv sync --extra training"
@@ -50,9 +58,6 @@ class SupervisedModelRuntime:
         Always returns a RuntimeDecision — never raises.
         decision_mode is MODEL when the model successfully scored moves,
         FALLBACK or ERROR_RECOVERED otherwise (with explicit fallback_reason).
-
-        Raises ValueError only if legal_uci_moves is empty, which is a
-        programming error (Game Service must always provide ≥1 legal move).
         """
         if not legal_uci_moves:
             return RuntimeDecision(
@@ -62,8 +67,9 @@ class SupervisedModelRuntime:
                 error_detail="legal_uci_moves was empty; Game Service should prevent this",
             )
 
+        # Step 1: encode position
         try:
-            features = encode_fen(fen)
+            pos_features = encode_fen(fen)
         except ValueError as exc:
             return _fallback(
                 legal_uci_moves,
@@ -77,94 +83,59 @@ class SupervisedModelRuntime:
                 f"Unexpected error during FEN encoding: {type(exc).__name__}: {exc}",
             )
 
+        # Step 2: encode legal moves
         try:
-            x = self._torch.from_numpy(features).unsqueeze(0)  # (1, FEATURE_SIZE)
-            with self._torch.no_grad():
-                logits = self._loaded.model(x).squeeze(0)  # (MOVE_VOCAB_SIZE,)
-        except Exception as exc:
+            move_features = encode_moves(legal_uci_moves)
+        except ValueError as exc:
             return _fallback(
                 legal_uci_moves,
                 FallbackReason.MODEL_FAILURE,
-                f"Forward pass failed: {type(exc).__name__}: {exc}",
+                f"Move encoding failed: {exc}",
             )
-
-        try:
-            return _pick_best(self._torch, logits, legal_uci_moves)
         except Exception as exc:
             return _fallback(
                 legal_uci_moves,
                 FallbackReason.RUNTIME_EXCEPTION,
-                f"Move selection failed: {type(exc).__name__}: {exc}",
+                f"Unexpected error during move encoding: {type(exc).__name__}: {exc}",
+            )
+
+        # Step 3: score and select
+        try:
+            torch = self._torch
+            F = self._F
+
+            # pos: (1, FEATURE_SIZE), moves: (1, N, MOVE_FEATURE_SIZE)
+            pos_t = torch.from_numpy(pos_features).unsqueeze(0)
+            move_t = torch.from_numpy(move_features).unsqueeze(0)
+
+            with torch.no_grad():
+                scores = self._loaded.model(pos_t, move_t).squeeze(0)  # (N,)
+
+            probs = F.softmax(scores, dim=0)
+            best_idx = int(probs.argmax().item())
+            confidence = float(probs[best_idx].item())
+            confidence = max(0.0, min(1.0, confidence))
+
+            return RuntimeDecision(
+                selected_uci=legal_uci_moves[best_idx],
+                decision_mode=DecisionMode.MODEL,
+                confidence=confidence,
+            )
+
+        except Exception as exc:
+            return _fallback(
+                legal_uci_moves,
+                FallbackReason.MODEL_FAILURE,
+                f"Scoring failed: {type(exc).__name__}: {exc}",
             )
 
 
-# ---------------------------------------------------------------------------
-# Module-level helpers (no self state needed)
-# ---------------------------------------------------------------------------
-
-
-def _pick_best(torch_module, logits, legal_moves: list[str]) -> RuntimeDecision:
-    """Select the highest-probability legal move.
-
-    Returns FALLBACK/INVALID_OUTPUT if no legal move maps to a valid vocab index.
-    Promotion tie-breaking: prefer queen > rook > bishop > knight.
-    """
-    import torch.nn.functional as F
-
-    # Group legal moves by vocabulary index; keep preferred promotion per index.
-    index_to_best_uci: dict[int, str] = {}
-    skipped = 0
-    for uci in legal_moves:
-        try:
-            idx = encode_uci_move(uci)
-        except ValueError:
-            skipped += 1
-            continue
-        if idx not in index_to_best_uci:
-            index_to_best_uci[idx] = uci
-        else:
-            existing = index_to_best_uci[idx]
-            if _promo_priority(uci) < _promo_priority(existing):
-                index_to_best_uci[idx] = uci
-
-    if not index_to_best_uci:
-        return _fallback(
-            legal_moves,
-            FallbackReason.INVALID_OUTPUT,
-            f"All {len(legal_moves)} legal moves failed UCI encoding ({skipped} skipped)",
-        )
-
-    indices = list(index_to_best_uci.keys())
-    scores = logits[indices]
-    probs = F.softmax(scores, dim=0)
-    best_local = int(probs.argmax().item())
-    best_uci = index_to_best_uci[indices[best_local]]
-    confidence = float(probs[best_local].item())
-    confidence = max(0.0, min(1.0, confidence))
-
-    return RuntimeDecision(
-        selected_uci=best_uci,
-        decision_mode=DecisionMode.MODEL,
-        confidence=confidence,
-    )
-
-
-def _fallback(
-    legal_moves: list[str],
-    reason: FallbackReason,
-    error_detail: str,
-) -> RuntimeDecision:
+def _fallback(legal_moves: list[str], reason: FallbackReason, detail: str) -> RuntimeDecision:
     """Return the first legal move with explicit fallback classification."""
     return RuntimeDecision(
         selected_uci=legal_moves[0],
         decision_mode=DecisionMode.FALLBACK,
         confidence=None,
         fallback_reason=reason,
-        error_detail=error_detail[:_ERROR_DETAIL_MAX_LEN],
+        error_detail=detail[:_ERROR_DETAIL_MAX_LEN],
     )
-
-
-def _promo_priority(uci: str) -> int:
-    if len(uci) == 5:
-        return _PROMO_PRIORITY.get(uci[4], 99)
-    return _PROMO_PRIORITY[""]

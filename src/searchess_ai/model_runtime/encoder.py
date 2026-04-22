@@ -1,8 +1,7 @@
-"""Shared feature encoding for training and inference.
+"""Position feature encoding — the single source of truth for board representation.
 
-This module is the single source of truth for how board positions and moves
-are converted to numeric representations. Training and inference must both
-import from here — never duplicate or diverge this logic.
+This module encodes chess positions (FEN strings) into fixed-size float32
+feature vectors used by both training and inference.
 
 Encoder stability contract
 --------------------------
@@ -15,6 +14,8 @@ compute_encoder_fingerprint() produces a short deterministic string that is
 embedded in every artifact's encoder_config. At load time, the runtime
 recomputes this fingerprint and compares — if encode_fen() changed but
 ENCODER_VERSION was not bumped, the fingerprint check still catches the drift.
+
+Move encoding lives in move_encoder.py, not here.
 
 Updating the encoder
 --------------------
@@ -48,12 +49,6 @@ except ImportError as exc:
 #   [768:772] castling rights (WK, WQ, BK, BQ)
 #   [772]     side to move (1.0 = white, 0.0 = black)
 FEATURE_SIZE: int = 773
-
-# Move vocabulary: (from_square × 64 + to_square), range [0, 4095].
-# Promotion piece is NOT encoded — all promotions between the same square pair
-# share one vocabulary index. At inference, queen promotion is assumed when a
-# pawn reaches the back rank. This is a known baseline limitation.
-MOVE_VOCAB_SIZE: int = 4096
 
 # Bump this when encode_fen() changes in a way that alters the feature vector.
 # Must also update _REFERENCE_NONZERO_INDICES when bumping.
@@ -164,27 +159,6 @@ def encode_fen(fen: str) -> np.ndarray:
     return features
 
 
-def encode_uci_move(uci: str) -> int:
-    """UCI string → integer index in [0, MOVE_VOCAB_SIZE).
-
-    Promotion piece is stripped. Raises ValueError for malformed UCI.
-    """
-    try:
-        move = chess.Move.from_uci(uci)
-    except ValueError as exc:
-        raise ValueError(f"Invalid UCI move: {uci!r}") from exc
-    return move.from_square * 64 + move.to_square
-
-
-def decode_move_index(idx: int) -> str:
-    """Integer index → base UCI string (no promotion piece)."""
-    if not (0 <= idx < MOVE_VOCAB_SIZE):
-        raise ValueError(f"Move index {idx} out of range [0, {MOVE_VOCAB_SIZE})")
-    from_sq = idx // 64
-    to_sq = idx % 64
-    return chess.Move(from_sq, to_sq).uci()
-
-
 # ---------------------------------------------------------------------------
 # Encoder stability checks
 # ---------------------------------------------------------------------------
@@ -233,7 +207,7 @@ def verify_encoder_stable() -> None:
 
 
 def encoder_config() -> dict:
-    """Return a serialisable snapshot of encoding parameters.
+    """Return a serialisable snapshot of position encoding parameters.
 
     Includes the live fingerprint so artifacts carry behavioral identity,
     not just a version string.
@@ -241,12 +215,10 @@ def encoder_config() -> dict:
     return {
         "version": ENCODER_VERSION,
         "feature_size": FEATURE_SIZE,
-        "move_vocab_size": MOVE_VOCAB_SIZE,
         "fingerprint": compute_encoder_fingerprint(),
         "piece_plane_order": ["P", "p", "N", "n", "B", "b", "R", "r", "Q", "q", "K", "k"],
         "castling_bits": ["WK", "WQ", "BK", "BQ"],
         "side_to_move_index": 772,
-        "promotion_handling": "queen_default",
     }
 
 
@@ -256,10 +228,9 @@ def encoder_config() -> dict:
 
 
 if __name__ == "__main__":
-    print("Encoder self-check")
+    print("Position encoder self-check")
     print(f"  ENCODER_VERSION : {ENCODER_VERSION}")
     print(f"  FEATURE_SIZE    : {FEATURE_SIZE}")
-    print(f"  MOVE_VOCAB_SIZE : {MOVE_VOCAB_SIZE}")
     print(f"  REFERENCE_FEN   : {REFERENCE_FEN}")
     fp = compute_encoder_fingerprint()
     print(f"  fingerprint     : {fp}")

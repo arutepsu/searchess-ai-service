@@ -31,6 +31,7 @@ class ModelMetadata:
     model_version: str
     artifact_id: str
     encoder_version: str
+    move_encoder_version: str
     artifact_dir: str
     loaded_at: str
 
@@ -39,6 +40,7 @@ class ModelMetadata:
             "model_version": self.model_version,
             "artifact_id": self.artifact_id,
             "encoder_version": self.encoder_version,
+            "move_encoder_version": self.move_encoder_version,
             "artifact_dir": self.artifact_dir,
             "loaded_at": self.loaded_at,
         }
@@ -269,6 +271,7 @@ def _load_runtime_and_metadata(artifact_dir: Path, device: str):
         model_version=loaded.model_version,
         artifact_id=loaded.artifact_id,
         encoder_version=loaded.encoder_version,
+        move_encoder_version=loaded.move_encoder_version,
         artifact_dir=str(artifact_dir),
         loaded_at=datetime.now(timezone.utc).isoformat(),
     )
