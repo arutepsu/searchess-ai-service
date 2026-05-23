@@ -863,6 +863,11 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+serving = [
+    { name = "numpy" },
+    { name = "python-chess" },
+    { name = "torch" },
+]
 training = [
     { name = "numpy" },
     { name = "pandas" },
@@ -881,14 +886,17 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi" },
+    { name = "numpy", marker = "extra == 'serving'", specifier = ">=1.24" },
     { name = "numpy", marker = "extra == 'training'", specifier = ">=1.24" },
     { name = "pandas", marker = "extra == 'training'", specifier = ">=2.0" },
     { name = "pyarrow", marker = "extra == 'training'", specifier = ">=14.0" },
+    { name = "python-chess", marker = "extra == 'serving'", specifier = ">=1.999" },
     { name = "python-chess", marker = "extra == 'training'", specifier = ">=1.999" },
+    { name = "torch", marker = "extra == 'serving'", specifier = ">=2.0" },
     { name = "torch", marker = "extra == 'training'", specifier = ">=2.0" },
     { name = "uvicorn" },
 ]
-provides-extras = ["training"]
+provides-extras = ["serving", "training"]
 
 [package.metadata.requires-dev]
 dev = [
