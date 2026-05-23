@@ -1,23 +1,38 @@
-FROM python:3.14-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# Copy only what pip needs to install the package and its dependencies.
-# Copying pyproject.toml + src in two steps keeps the dependency layer
-# cacheable when only source code changes (not metadata).
+# Copy package metadata before source so the torch layer is cached independently.
 COPY pyproject.toml README.md ./
+
+# Install the serving extras (python-chess, numpy) from PyPI and torch CPU-only wheel
+# before copying source so this heavy layer is cached across source-only changes.
+# torch is installed from the pytorch CPU index to avoid the 2 GB CUDA wheel on PyPI.
+# numpy and python-chess are NOT bundled in the CPU torch wheel, so they are listed
+# explicitly; they match the [project.optional-dependencies.serving] set in pyproject.toml.
+RUN pip install --no-cache-dir "python-chess>=1.999" "numpy>=1.24" \
+ && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 COPY src/ src/
 
-# Install production dependencies only (no pytest/pylint/httpx).
+# Install the package (fastapi, uvicorn) and its declared dependencies.
+# torch is already present; pip resolves it from the local cache.
 RUN pip install --no-cache-dir .
 
 EXPOSE 8765
 
-# INFERENCE_BACKEND controls which backend answers move-suggestion requests.
-# "random" — picks a legal move at random; safe for integration testing.
-# "fake"   — always picks legalMoves[0]; deterministic, used in unit tests.
-# "openspiel" — requires open_spiel installed; not bundled in this image.
-ENV INFERENCE_BACKEND=random
+# INFERENCE_BACKEND selects the move-selection engine at startup:
+#   "fake"       — always picks legalMoves[0]; deterministic, safe default
+#   "random"     — uniformly random selection from legal moves
+#   "supervised" — trained neural-network policy; MODEL_ARTIFACT_DIR must be set
+#
+# When INFERENCE_BACKEND=supervised, mount the artifact directory into the container
+# and set MODEL_ARTIFACT_DIR to the specific run directory inside it:
+#   docker run \
+#     -v /host/artifacts:/artifacts:ro \
+#     -e INFERENCE_BACKEND=supervised \
+#     -e MODEL_ARTIFACT_DIR=/artifacts/run_<id> \
+#     searchess-ai-service
+ENV INFERENCE_BACKEND=fake
 
-CMD ["uvicorn", "searchess_ai.api.app:create_app", "--factory", \
-     "--host", "0.0.0.0", "--port", "8765"]
+CMD ["uvicorn", "searchess_ai.main:app", "--host", "0.0.0.0", "--port", "8765"]

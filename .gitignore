@@ -32,3 +32,6 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local environment overrides — never commit real values
+.env

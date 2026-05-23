@@ -1,9 +1,30 @@
 services:
-  ai-service:
+  searchess-ai-service:
     build: .
     ports:
       - "8765:8765"
     environment:
-      # "random" picks a legal move at random.
-      # Change to "fake" for deterministic first-move responses.
-      INFERENCE_BACKEND: random
+      INFERENCE_BACKEND: supervised
+      # MODEL_RUN_ID selects which run directory under /artifacts to load.
+      # Set MODEL_RUN_ID in .env or your shell before running docker compose up.
+      MODEL_ARTIFACT_DIR: /artifacts/${MODEL_RUN_ID:-run_20260504_063449_ec53ea87}
+    volumes:
+      # Mount the host artifact root read-only.
+      # Set AI_ARTIFACT_ROOT in your shell or .env before running docker compose up.
+      # Default matches the current local training output location.
+      - type: bind
+        source: ${AI_ARTIFACT_ROOT:-C:/uni/SA/artifacts}
+        target: /artifacts
+        read_only: true
+    healthcheck:
+      # No curl in the slim image — use Python stdlib instead.
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      # Give uvicorn time to bind before the first health probe fires.
+      start_period: 30s

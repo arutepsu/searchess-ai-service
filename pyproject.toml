@@ -10,7 +10,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Install to use dataset pipeline, training, and supervised inference backend.
+# Packages required to run the supervised inference backend in production.
+# torch must be installed from the CPU-only index (see Dockerfile).
+serving = [
+    "python-chess>=1.999",
+    "numpy>=1.24",
+    "torch>=2.0",
+]
+
+# Full training stack — dataset pipeline, training, and supervised inference.
 # torch is listed separately because it requires an index-url on some platforms.
 training = [
     "python-chess>=1.999",

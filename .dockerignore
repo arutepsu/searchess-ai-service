@@ -4,6 +4,10 @@
 .pytest_cache/
 tests/
 docs/
+scripts/
+artifacts/
+datasets/
+train_data/
 *.pyc
 __pycache__/
 uv.lock
