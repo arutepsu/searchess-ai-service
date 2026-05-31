@@ -3,10 +3,13 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
+import os
 import time
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from opentelemetry import context as otel_context
+from opentelemetry import trace
 from pydantic import ValidationError
 
 from searchess_ai.api.dependencies import get_choose_move_use_case
@@ -86,7 +89,11 @@ async def suggest_move(
 
     timeout_seconds = dto.limits.timeout_millis / 1000.0
     started_at = time.monotonic()
-    future = _executor.submit(_execute, dto, use_case)
+    # Capture the current OTel context (carries the FastAPI request span created
+    # by FastAPIInstrumentor) so the manual python_ai.inference span created
+    # inside the thread pool becomes a proper child span.
+    ctx = otel_context.get_current()
+    future = _executor.submit(_execute, dto, use_case, ctx)
 
     try:
         response_dto = future.result(timeout=timeout_seconds)
@@ -121,40 +128,59 @@ async def suggest_move(
 def _execute(
     dto: MoveSuggestionRequestDto,
     use_case: ChooseMoveUseCase,
+    parent_context: object | None = None,
 ) -> MoveSuggestionResponseDto:
-    # Adapt public contract → internal domain objects.
-    legal_moves = LegalMoveSet(tuple(Move(move_dto_to_uci(m)) for m in dto.legal_moves))
-
-    inference_request = InferenceRequest(
-        request_id=dto.request_id,
-        # gameId is the closest public concept to internal match_id
-        match_id=dto.game_id,
-        position=Position(dto.fen),
-        side_to_move=SideToMove(dto.side_to_move),
-        legal_moves=legal_moves,
-        model_id=ModelId(dto.engine.engine_id) if dto.engine and dto.engine.engine_id else None,
-        # limits.timeoutMillis → remaining_time_millis (adapter step; internal semantics differ)
-        remaining_time_millis=dto.limits.timeout_millis,
-    )
-
+    # Attach the parent OTel context so the manual span is a child of the
+    # FastAPI request span created in the async handler.
+    otel_token = otel_context.attach(parent_context) if parent_context is not None else None
     try:
-        decision = use_case.execute(inference_request)
-    except BadPositionAdapterError as exc:
-        raise BadPositionError(str(exc)) from exc
-    except OpenSpielAdapterError as exc:
-        msg = str(exc)
-        if "not installed" in msg.lower():
-            raise EngineUnavailableError(msg) from exc
-        raise EngineFailureError(msg) from exc
-    except ValueError as exc:
-        raise EngineFailureError(str(exc)) from exc
+        tracer = trace.get_tracer(__name__)
+        with tracer.start_as_current_span("python_ai.inference") as span:
+            span.set_attribute("ai.backend", os.getenv("INFERENCE_BACKEND", "fake"))
+            span.set_attribute("ai.legal_move_count", len(dto.legal_moves))
+            span.set_attribute("ai.request_id", dto.request_id)
+            if dto.engine and dto.engine.engine_id:
+                span.set_attribute("ai.engine_id", dto.engine.engine_id)
 
-    # Adapt internal decision → public response contract.
-    return MoveSuggestionResponseDto(
-        request_id=decision.request_id,
-        move=uci_to_move_dto(decision.selected_move.value),
-        engine_id=decision.model_id.value,
-        engine_version=decision.model_version.value,
-        elapsed_millis=decision.decision_time_millis,
-        confidence=decision.confidence,
-    )
+            # Adapt public contract → internal domain objects.
+            legal_moves = LegalMoveSet(tuple(Move(move_dto_to_uci(m)) for m in dto.legal_moves))
+
+            inference_request = InferenceRequest(
+                request_id=dto.request_id,
+                # gameId is the closest public concept to internal match_id
+                match_id=dto.game_id,
+                position=Position(dto.fen),
+                side_to_move=SideToMove(dto.side_to_move),
+                legal_moves=legal_moves,
+                model_id=ModelId(dto.engine.engine_id) if dto.engine and dto.engine.engine_id else None,
+                # limits.timeoutMillis → remaining_time_millis (adapter step; internal semantics differ)
+                remaining_time_millis=dto.limits.timeout_millis,
+            )
+
+            try:
+                decision = use_case.execute(inference_request)
+            except BadPositionAdapterError as exc:
+                raise BadPositionError(str(exc)) from exc
+            except OpenSpielAdapterError as exc:
+                msg = str(exc)
+                if "not installed" in msg.lower():
+                    raise EngineUnavailableError(msg) from exc
+                raise EngineFailureError(msg) from exc
+            except ValueError as exc:
+                raise EngineFailureError(str(exc)) from exc
+
+            # Record the actual engine id chosen by the backend.
+            span.set_attribute("ai.engine_id", decision.model_id.value)
+
+            # Adapt internal decision → public response contract.
+            return MoveSuggestionResponseDto(
+                request_id=decision.request_id,
+                move=uci_to_move_dto(decision.selected_move.value),
+                engine_id=decision.model_id.value,
+                engine_version=decision.model_version.value,
+                elapsed_millis=decision.decision_time_millis,
+                confidence=decision.confidence,
+            )
+    finally:
+        if otel_token is not None:
+            otel_context.detach(otel_token)

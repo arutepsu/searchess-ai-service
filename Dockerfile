@@ -13,6 +13,13 @@ COPY pyproject.toml README.md ./
 RUN pip install --no-cache-dir "python-chess>=1.999" "numpy>=1.24" \
  && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
+# Install OpenTelemetry packages in a separate layer before copying source so
+# they are cached independently of application code changes.
+RUN pip install --no-cache-dir \
+    "opentelemetry-sdk>=1.20.0" \
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0" \
+    "opentelemetry-instrumentation-fastapi>=0.41b0"
+
 COPY src/ src/
 
 # Install the package (fastapi, uvicorn) and its declared dependencies.

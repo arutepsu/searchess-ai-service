@@ -35,3 +35,6 @@ Thumbs.db
 
 # Local environment overrides — never commit real values
 .env
+# Local Docker image exports
+*.tar
+
